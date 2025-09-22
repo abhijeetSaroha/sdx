@@ -2,9 +2,8 @@
 
 from __future__ import annotations
 
+import json
 import os
-import random
-import shutil
 import warnings
 
 from pathlib import Path
@@ -15,14 +14,17 @@ from dotenv import dotenv_values, load_dotenv
 from fastapi.testclient import TestClient
 from sdx.agents.extraction.medical_reports import MedicalReportFileExtractor
 from sdx.agents.extraction.wearable import WearableDataFileExtractor
+from sqlalchemy import create_engine
+from sqlalchemy.orm import sessionmaker
 
 from research.app.main import app
-from research.models.repositories import PatientRepository
+from research.models.repositories import ResearchRepository
 
 
 @pytest.fixture
 def env() -> dict[str, str | None]:
     """Return a fixture for the environment variables from .env file."""
+    # This assumes a .envs/.env file at the project root
     dotenv_path = Path(__file__).parents[1] / '.envs' / '.env'
     if not dotenv_path.exists():
         warnings.warn(
@@ -30,9 +32,17 @@ def env() -> dict[str, str | None]:
             'tests requiring environment variables might fail or be skipped.'
         )
         return {}
-
     load_dotenv(dotenv_path=dotenv_path)
     return dotenv_values(dotenv_path)
+
+
+@pytest.fixture
+def api_key_openai(env: dict[str, str | None]) -> str | None:
+    """Fixture providing the OpenAI API key. Skips test if not found."""
+    api_key = os.getenv('OPENAI_API_KEY')
+    if not api_key:
+        pytest.skip('OpenAI API key not available')
+    return api_key
 
 
 @pytest.fixture
@@ -44,73 +54,59 @@ def test_data_dir() -> Path:
 @pytest.fixture
 def reports_pdf_dir(test_data_dir: Path) -> Path:
     """Fixture for the directory containing PDF report files."""
-    pdf_dir = test_data_dir / 'reports' / 'pdf_reports'
-    if not pdf_dir.exists():
-        pdf_dir.mkdir(parents=True, exist_ok=True)
-    return pdf_dir
+    return test_data_dir / 'reports' / 'pdf_reports'
 
 
 @pytest.fixture
 def reports_image_dir(test_data_dir: Path) -> Path:
     """Fixture for the directory containing image report files."""
-    image_dir = test_data_dir / 'reports' / 'image_reports'
-    if not image_dir.exists():
-        image_dir.mkdir(parents=True, exist_ok=True)
-    return image_dir
+    return test_data_dir / 'reports' / 'image_reports'
+
+
+@pytest.fixture(scope='session')
+def patients_json() -> list[dict]:
+    """Load the test patients JSON data."""
+    path = Path(__file__).parent / 'data' / 'patients' / 'patients.json'
+    return json.loads(path.read_text())
 
 
 @pytest.fixture
-def api_key_openai(env: dict[str, str | None]) -> str:
-    """Fixture providing the OpenAI API key from environment variables."""
-    api_key = os.getenv('OPENAI_API_KEY')
-
-    if not api_key:
-        raise EnvironmentError(
-            'Please set the OPENAI_API_KEY environment variable in your .env '
-            'file or system environment for testing.'
-        )
-
-    return api_key
+def wearable_extractor():
+    """Provide a WearableDataFileExtractor instance for tests."""
+    return WearableDataFileExtractor()
 
 
 @pytest.fixture
-def patient_repository():
-    """Temporary patient repository fixture."""
-    # Setup a temporary data file for tests
-    test_data_dir = Path(__file__).parent / 'data' / 'patients'
-    original_data_path = test_data_dir / 'patients.json'
-    temp_data_path = test_data_dir / 'temp_patients.json'
-
-    shutil.copyfile(original_data_path, temp_data_path)
-
-    # Provide the repository instance with the correct path
-    temporary_repository = PatientRepository(data_path=temp_data_path)
-    yield temporary_repository
-
-    # Teardown: remove the temporary file
-    temp_data_path.unlink()
+def medical_extractor():
+    """Provide a MedicalReportFileExtractor instance for tests."""
+    return MedicalReportFileExtractor()
 
 
-@pytest.fixture
-def patient_id(patient_repository):
-    """Patient ID fixture."""
-    patients = patient_repository.all()
-    return random.choice(patients)['meta']['uuid']
+# Use an in-memory SQLite database for fast, isolated tests
+TEST_DB_URL = 'sqlite:///:memory:'
+engine = create_engine(TEST_DB_URL, connect_args={'check_same_thread': False})
+TestingSessionLocal = sessionmaker(
+    autocommit=False, autoflush=False, bind=engine
+)
+
+
+@pytest.fixture(scope='function')
+def db_session():
+    """Create a new database session for each test."""
+    session = TestingSessionLocal()
+    try:
+        yield session
+    finally:
+        session.close()
+
+
+@pytest.fixture(scope='function')
+def test_repo(db_session):
+    """Provide a ResearchRepository instance with a test database session."""
+    return ResearchRepository(db_session)
 
 
 @pytest.fixture
 def client():
     """FastAPI test client fixture."""
     return TestClient(app)
-
-
-@pytest.fixture
-def wearable_extractor():
-    """Wearable data extractor fixture."""
-    return WearableDataFileExtractor()
-
-
-@pytest.fixture
-def medical_extractor():
-    """Medical report extractor fixture."""
-    return MedicalReportFileExtractor()
