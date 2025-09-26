@@ -4,9 +4,23 @@
   ],
   "imageSize": 100,
   "commit": false,
+  "commitType": "docs",
+  "commitConvention": "angular",
+  "contributors": [
+    {
+      "login": "xmnlab",
+      "name": "Ivan Ogasawara",
+      "avatar_url": "https://avatars.githubusercontent.com/u/5209757?v=4",
+      "profile": "https://xmnlab.github.io",
+      "contributions": [
+        "code"
+      ]
+    }
+  ],
   "contributorsPerLine": 7,
-  "projectName": "sdx",
-  "projectOwner": "sdx-org",
+  "skipCi": true,
   "repoType": "github",
-  "repoHost": "https://github.com"
+  "repoHost": "https://github.com",
+  "projectName": "sdx",
+  "projectOwner": "sdx-org"
 }
